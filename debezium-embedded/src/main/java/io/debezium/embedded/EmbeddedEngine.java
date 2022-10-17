@@ -248,6 +248,8 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
         private DebeziumEngine.CompletionCallback completionCallback;
         private DebeziumEngine.ConnectorCallback connectorCallback;
         private OffsetCommitPolicy offsetCommitPolicy = null;
+        private SourceConnector sourceConnector;
+        private OffsetBackingStore offsetBackingStore;
 
         @Override
         public Builder using(Configuration config) {
@@ -270,6 +272,18 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
         @Override
         public Builder using(Clock clock) {
             this.clock = clock;
+            return this;
+        }
+
+        @Override
+        public Builder using(SourceConnector sourceConnector) {
+            this.sourceConnector = sourceConnector;
+            return this;
+        }
+
+        @Override
+        public Builder using(OffsetBackingStore offsetBackingStore) {
+            this.offsetBackingStore = offsetBackingStore;
             return this;
         }
 
@@ -328,7 +342,7 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
             }
             Objects.requireNonNull(config, "A connector configuration must be specified.");
             Objects.requireNonNull(handler, "A connector consumer or changeHandler must be specified.");
-            return new EmbeddedEngine(config, classLoader, clock,
+            return new EmbeddedEngine(config, classLoader, clock, sourceConnector, offsetBackingStore,
                     handler, completionCallback, connectorCallback, offsetCommitPolicy);
         }
 
@@ -555,6 +569,11 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
         Builder using(OffsetCommitPolicy policy);
 
         @Override
+        Builder using(SourceConnector sourceConnector);
+
+        Builder using(OffsetBackingStore offsetBackingStore);
+
+        @Override
         EmbeddedEngine build();
     }
 
@@ -585,17 +604,27 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
     private long recordsSinceLastCommit = 0;
     private long timeOfLastCommitMillis = 0;
     private OffsetCommitPolicy offsetCommitPolicy;
+    private SourceConnector sourceConnector;
+    private OffsetBackingStore offsetBackingStore;
 
     private SourceTask task;
     private final Transformations transformations;
 
-    private EmbeddedEngine(Configuration config, ClassLoader classLoader, Clock clock, DebeziumEngine.ChangeConsumer<SourceRecord> handler,
-                           DebeziumEngine.CompletionCallback completionCallback, DebeziumEngine.ConnectorCallback connectorCallback,
+    private EmbeddedEngine(
+                           Configuration config,
+                           ClassLoader classLoader,
+                           Clock clock,
+                           SourceConnector sourceConnector,
+                           OffsetBackingStore offsetBackingStore,
+                           DebeziumEngine.ChangeConsumer<SourceRecord> handler,
+                           DebeziumEngine.CompletionCallback completionCallback,
+                           DebeziumEngine.ConnectorCallback connectorCallback,
                            OffsetCommitPolicy offsetCommitPolicy) {
-        this.config = config;
-        this.handler = handler;
         this.classLoader = classLoader;
         this.clock = clock;
+        this.sourceConnector = sourceConnector;
+        this.offsetBackingStore = offsetBackingStore;
+        this.handler = handler;
         this.completionCallback = completionCallback != null ? completionCallback : (success, msg, error) -> {
             if (!success) {
                 LOGGER.error(msg, error);
@@ -604,6 +633,13 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
         this.connectorCallback = connectorCallback;
         this.completionResult = new CompletionResult();
         this.offsetCommitPolicy = offsetCommitPolicy;
+
+        if (sourceConnector != null && !config.hasKey(EmbeddedEngine.CONNECTOR_CLASS.name())) {
+            config = Configuration.copy(config)
+                    .with(EmbeddedEngine.CONNECTOR_CLASS.name(), sourceConnector.getClass().getName())
+                    .build();
+        }
+        this.config = config;
 
         assert this.config != null;
         assert this.handler != null;
@@ -675,7 +711,7 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
         if (runningThread.compareAndSet(null, Thread.currentThread())) {
 
             final String engineName = config.getString(ENGINE_NAME);
-            final String connectorClassName = config.getString(CONNECTOR_CLASS);
+            String connectorClassName = config.getString(CONNECTOR_CLASS);
             final Optional<DebeziumEngine.ConnectorCallback> connectorCallback = Optional.ofNullable(this.connectorCallback);
             // Only one thread can be in this part of the method at a time ...
             latch.countUp();
@@ -685,29 +721,33 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
                     return;
                 }
 
-                // Instantiate the connector ...
-                SourceConnector connector = null;
-                try {
-                    @SuppressWarnings("unchecked")
-                    Class<? extends SourceConnector> connectorClass = (Class<SourceConnector>) classLoader.loadClass(connectorClassName);
-                    connector = connectorClass.getDeclaredConstructor().newInstance();
-                }
-                catch (Throwable t) {
-                    fail("Unable to instantiate connector class '" + connectorClassName + "'", t);
-                    return;
+                // Instantiate the connector if necessary ...
+                SourceConnector connector = sourceConnector;
+                if (connector == null) {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        Class<? extends SourceConnector> connectorClass = (Class<SourceConnector>) classLoader.loadClass(connectorClassName);
+                        connector = connectorClass.getDeclaredConstructor().newInstance();
+                    }
+                    catch (Throwable t) {
+                        fail("Unable to instantiate connector class '" + connectorClassName + "'", t);
+                        return;
+                    }
                 }
 
                 // Instantiate the offset store ...
-                final String offsetStoreClassName = config.getString(OFFSET_STORAGE);
-                OffsetBackingStore offsetStore = null;
-                try {
-                    @SuppressWarnings("unchecked")
-                    Class<? extends OffsetBackingStore> offsetStoreClass = (Class<OffsetBackingStore>) classLoader.loadClass(offsetStoreClassName);
-                    offsetStore = offsetStoreClass.getDeclaredConstructor().newInstance();
-                }
-                catch (Throwable t) {
-                    fail("Unable to instantiate OffsetBackingStore class '" + offsetStoreClassName + "'", t);
-                    return;
+                OffsetBackingStore offsetStore = offsetBackingStore;
+                if (offsetStore == null) {
+                    final String offsetStoreClassName = config.getString(OFFSET_STORAGE);
+                    try {
+                        @SuppressWarnings("unchecked")
+                        Class<? extends OffsetBackingStore> offsetStoreClass = (Class<OffsetBackingStore>) classLoader.loadClass(offsetStoreClassName);
+                        offsetStore = offsetStoreClass.getDeclaredConstructor().newInstance();
+                    }
+                    catch (Throwable t) {
+                        fail("Unable to instantiate OffsetBackingStore class '" + offsetStoreClassName + "'", t);
+                        return;
+                    }
                 }
 
                 // Initialize the offset store ...
@@ -716,7 +756,7 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
                     offsetStore.start();
                 }
                 catch (Throwable t) {
-                    fail("Unable to configure and start the '" + offsetStoreClassName + "' offset backing store", t);
+                    fail("Unable to configure and start the '" + offsetStore.getClass().getName() + "' offset backing store", t);
                     offsetStore.stop();
                     return;
                 }
@@ -728,7 +768,7 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
                                 config.asProperties());
                     }
                     catch (Throwable t) {
-                        fail("Unable to instantiate OffsetCommitPolicy class '" + offsetStoreClassName + "'", t);
+                        fail("Unable to instantiate OffsetCommitPolicy class '" + offsetStore.getClass().getName() + "'", t);
                         return;
                     }
                 }

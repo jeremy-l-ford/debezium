@@ -16,6 +16,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 
+import org.apache.kafka.connect.source.SourceConnector;
 import org.slf4j.LoggerFactory;
 
 import io.debezium.DebeziumException;
@@ -235,7 +236,7 @@ public interface DebeziumEngine<R> extends Runnable, Closeable {
         Builder<R> using(CompletionCallback completionCallback);
 
         /**
-         * During the engine's {@link DebeziumEngine#run()} method, call the supplied the supplied function at different
+         * During the engine's {@link DebeziumEngine#run()} method, call the supplied function at different
          * stages according to the completion state of each component running within the engine (connectors, tasks etc)
          *
          * @param connectorCallback the callback function; may be null
@@ -250,6 +251,13 @@ public interface DebeziumEngine<R> extends Runnable, Closeable {
          * @return this builder object so methods can be chained together; never null
          */
         Builder<R> using(OffsetCommitPolicy policy);
+
+        /**
+         * Supply the engine with a pre-instantiated {@link SourceConnector}.
+         * @param sourceConnector
+         * @return this builder object so methods can be chained together; never null
+         */
+        Builder<R> using(SourceConnector sourceConnector);
 
         /**
          * Build a new connector with the information previously supplied to this builder.

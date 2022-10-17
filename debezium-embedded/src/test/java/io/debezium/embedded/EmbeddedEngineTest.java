@@ -116,7 +116,6 @@ public class EmbeddedEngineTest extends AbstractConnectorTest {
 
         final Properties props = new Properties();
         props.setProperty("name", "debezium-engine");
-        props.setProperty("connector.class", "org.apache.kafka.connect.file.FileStreamSourceConnector");
         props.setProperty(StandaloneConfig.OFFSET_STORAGE_FILE_FILENAME_CONFIG, OFFSET_STORE_PATH.toAbsolutePath().toString());
         props.setProperty("offset.flush.interval.ms", "0");
         props.setProperty("file", TEST_FILE_PATH.toAbsolutePath().toString());
@@ -127,6 +126,7 @@ public class EmbeddedEngineTest extends AbstractConnectorTest {
         // create an engine with our custom class
         final DebeziumEngine<ChangeEvent<String, String>> engine = DebeziumEngine.create(Json.class, Json.class)
                 .using(props)
+                .using(new FileStreamSourceConnector())
                 .notifying((records, committer) -> {
                     assertThat(records.size()).isGreaterThanOrEqualTo(NUMBER_OF_LINES);
                     for (ChangeEvent<String, String> record : records) {
@@ -162,16 +162,16 @@ public class EmbeddedEngineTest extends AbstractConnectorTest {
 
         Configuration config = Configuration.create()
                 .with(EmbeddedEngine.ENGINE_NAME, "testing-connector")
-                .with(EmbeddedEngine.CONNECTOR_CLASS, InterruptedConnector.class)
                 .with(StandaloneConfig.OFFSET_STORAGE_FILE_FILENAME_CONFIG, OFFSET_STORE_PATH)
                 .with(EmbeddedEngine.OFFSET_FLUSH_INTERVAL_MS, 0)
-                .with(EmbeddedEngine.OFFSET_STORAGE, InterruptingOffsetStore.class)
                 .build();
 
         CountDownLatch firstLatch = new CountDownLatch(1);
 
         engine = EmbeddedEngine.create()
                 .using(config)
+                .using(new InterruptingOffsetStore())
+                .using(new InterruptedConnector())
                 .notifying((records, committer) -> {
                 })
                 .using(this.getClass().getClassLoader())

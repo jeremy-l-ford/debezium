@@ -16,6 +16,15 @@
             <artifactId>slf4j-api</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>connect-api</artifactId>
+        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>org.apache.kafka</groupId>-->
+<!--            <artifactId>connect-runtime</artifactId>-->
+<!--        </dependency>-->
+
         <!-- Testing -->
         <dependency>
             <groupId>ch.qos.logback</groupId>
@@ -30,13 +39,6 @@
         <dependency>
             <groupId>org.easytesting</groupId>
             <artifactId>fest-assert</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <!-- Used for unit testing with Kafka -->
-        <dependency>
-            <groupId>org.apache.kafka</groupId>
-            <artifactId>connect-api</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

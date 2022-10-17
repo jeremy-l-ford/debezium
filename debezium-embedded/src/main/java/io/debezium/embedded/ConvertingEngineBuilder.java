@@ -13,6 +13,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.apache.kafka.connect.source.SourceConnector;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.storage.Converter;
 
@@ -127,6 +128,12 @@ public class ConvertingEngineBuilder<R> implements Builder<R> {
     @Override
     public Builder<R> using(Clock clock) {
         delegate.using(clock);
+        return this;
+    }
+
+    @Override
+    public Builder<R> using(SourceConnector sourceConnector) {
+        delegate.using(sourceConnector);
         return this;
     }
 
