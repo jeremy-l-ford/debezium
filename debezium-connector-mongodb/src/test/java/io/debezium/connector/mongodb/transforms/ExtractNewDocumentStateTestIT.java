@@ -5,7 +5,7 @@
  */
 package io.debezium.connector.mongodb.transforms;
 
-import static org.fest.assertions.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -26,10 +26,10 @@ import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.header.Header;
 import org.apache.kafka.connect.source.SourceRecord;
+import org.assertj.core.api.Assertions;
 import org.bson.Document;
 import org.bson.RawBsonDocument;
 import org.bson.types.ObjectId;
-import org.fest.assertions.Assertions;
 import org.junit.Test;
 
 import io.debezium.connector.mongodb.MongoDbFieldName;
@@ -1742,6 +1742,55 @@ public class ExtractNewDocumentStateTestIT extends AbstractExtractNewDocumentSta
         List<Struct> f2 = transformedInsertValue.getStruct("f1").getArray("f2");
         assertThat(f2.size()).isEqualTo(2);
         assertThat(f2.get(0).getArray("f3").size()).isEqualTo(0);
+    }
+
+    @Test
+    @FixFor({ "DBZ-5834" })
+    public void shouldAddUpdateDescription() throws Exception {
+        waitForStreamingRunning();
+
+        final Map<String, String> props = new HashMap<>();
+        props.put(ADD_HEADERS, "updateDescription.updatedFields");
+        props.put(ADD_HEADERS_PREFIX, "prefix.");
+        transformation.configure(props);
+
+        ObjectId objId = new ObjectId();
+        Document obj = new Document()
+                .append("_id", objId)
+                .append("name", "Sally")
+                .append("address", new Document()
+                        .append("street", "Morris Park Ave")
+                        .append("zipcode", "10462"));
+
+        // insert
+        primary().execute("insert", client -> {
+            client.getDatabase(DB_NAME).getCollection(this.getCollectionName()).insertOne(obj);
+        });
+
+        SourceRecords records = consumeRecordsByTopic(1);
+        assertThat(records.recordsForTopic(this.topicName()).size()).isEqualTo(1);
+        assertNoRecordsToConsume();
+
+        // update
+        Document updateObj = new Document()
+                .append("$set", new Document(Collect.hashMapOf(
+                        "name", "Mary",
+                        "zipcode", "11111")));
+
+        primary().execute("update", client -> {
+            client.getDatabase(DB_NAME).getCollection(this.getCollectionName())
+                    .updateOne(RawBsonDocument.parse("{ '_id' : { '$oid' : '" + objId + "'}}"), updateObj);
+        });
+
+        SourceRecords updateRecords = consumeRecordsByTopic(1);
+        assertThat(updateRecords.recordsForTopic(this.topicName()).size()).isEqualTo(1);
+
+        // do the transform
+        final SourceRecord transformed = transformation.apply(updateRecords.recordsForTopic(this.topicName()).get(0));
+
+        // verify headers
+        final String expectedUpdateFields = "{\"name\": \"Mary\", \"zipcode\": \"11111\"}";
+        assertThat(getSourceRecordHeaderByKey(transformed, "prefix.updateDescription_updatedFields")).isEqualTo(expectedUpdateFields);
     }
 
     private SourceRecords createCreateRecordFromJson(String pathOnClasspath) throws Exception {

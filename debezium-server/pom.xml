@@ -24,6 +24,7 @@
         <module>debezium-server-kafka</module>
         <module>debezium-server-pravega</module>
         <module>debezium-server-nats-streaming</module>
+        <module>debezium-server-nats-jetstream</module>
     </modules>
 
     <dependencyManagement>
@@ -79,8 +80,8 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.easytesting</groupId>
-            <artifactId>fest-assert</artifactId>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

@@ -5,7 +5,7 @@
  */
 package io.debezium.embedded;
 
-import static org.fest.assertions.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.File;
 import java.io.IOException;
@@ -41,7 +41,7 @@ import org.apache.kafka.connect.transforms.Transformation;
 import org.apache.kafka.connect.transforms.predicates.Predicate;
 import org.apache.kafka.connect.util.Callback;
 import org.apache.kafka.connect.util.SafeObjectInputStream;
-import org.fest.assertions.Assertions;
+import org.assertj.core.api.Assertions;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -725,6 +725,27 @@ public class EmbeddedEngineTest extends AbstractConnectorTest {
         engine.run();
 
         assertThat(exceptionCaught.get()).isTrue();
+    }
+
+    @FixFor("DBZ-4720")
+    @Test
+    public void validationThrowsException() throws Exception {
+        // Add initial content to the file ...
+        appendLinesToSource(NUMBER_OF_LINES);
+
+        // Start the connector ...
+        AtomicReference<String> errorReference = new AtomicReference<>();
+        start(FileStreamSourceConnector.class, Configuration.from(new Properties()), (success, message, error) -> {
+            if (message != null) {
+                errorReference.set(message);
+            }
+        });
+
+        assertNoRecordsToConsume();
+
+        assertThat(errorReference.get()).isNotNull();
+        assertThat(errorReference.get()).contains("Connector configuration is not valid. ");
+        assertThat(this.engine.isRunning()).isFalse();
     }
 }
 

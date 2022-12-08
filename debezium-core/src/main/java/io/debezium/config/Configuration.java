@@ -64,7 +64,8 @@ public interface Configuration {
 
     Logger CONFIGURATION_LOGGER = LoggerFactory.getLogger(Configuration.class);
 
-    Pattern PASSWORD_PATTERN = Pattern.compile(".*password$|.*sasl\\.jaas\\.config$", Pattern.CASE_INSENSITIVE);
+    Pattern PASSWORD_PATTERN = Pattern.compile(".*password$|.*sasl\\.jaas\\.config$|.*basic\\.auth\\.user\\.info|.*registry\\.auth\\.client-secret",
+            Pattern.CASE_INSENSITIVE);
 
     /**
      * The basic interface for configuration builders.
@@ -1538,7 +1539,7 @@ public interface Configuration {
             return this;
         }
 
-        Set<String> keys = new HashSet<>();
+        Set<String> keys = new HashSet<>(keys());
         for (Configuration config : configs) {
             keys.addAll(config.keys());
         }
@@ -1546,14 +1547,19 @@ public interface Configuration {
         return new Configuration() {
             @Override
             public Set<String> keys() {
-                return Collect.unmodifiableSet(Configuration.this.keys().stream()
-                        .filter(k -> k != null)
-                        .collect(Collectors.toSet()));
+                return Collect.unmodifiableSet(keys.stream().filter(k -> k != null).collect(Collectors.toSet()));
             }
 
             @Override
             public String getString(String key) {
-                return Configuration.this.getString(key);
+                String value = null;
+                for (Configuration config : Collect.arrayListOf(Configuration.this, configs)) {
+                    value = config.getString(key);
+                    if (value != null) {
+                        break;
+                    }
+                }
+                return value;
             }
 
             @Override

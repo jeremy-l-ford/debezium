@@ -6,7 +6,7 @@
 
 package io.debezium.connector.postgresql;
 
-import static org.fest.assertions.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.apache.kafka.connect.runtime.standalone.StandaloneConfig;
 import org.apache.kafka.connect.storage.FileOffsetBackingStore;
 import org.apache.kafka.connect.util.Callback;
-import org.fest.assertions.Assertions;
+import org.assertj.core.api.Assertions;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -68,6 +68,7 @@ public class DebeziumEngineIT {
     public void before() throws SQLException {
         OFFSET_STORE_PATH.getParent().toFile().mkdirs();
         OFFSET_STORE_PATH.toFile().delete();
+        TestHelper.dropDefaultReplicationSlot();
         TestHelper.dropAllSchemas();
         TestHelper.execute(
                 "CREATE SCHEMA engine;",
@@ -244,6 +245,7 @@ public class DebeziumEngineIT {
                 OFFSET_STORE_PATH.toAbsolutePath().toString());
         props.setProperty("offset.flush.interval.ms", "3000");
         props.setProperty("converter.schemas.enable", "false");
+        props.setProperty("slot.drop.on.stop", "false");
         props.setProperty("offset.storage",
                 TestOffsetStore.class.getName());
 

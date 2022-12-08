@@ -6,7 +6,7 @@
 
 package io.debezium.connector.mysql;
 
-import static org.fest.assertions.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
@@ -28,7 +28,7 @@ import java.util.stream.Stream;
 
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
-import org.fest.assertions.Assertions;
+import org.assertj.core.api.Assertions;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -2981,6 +2981,14 @@ public class MySqlAntlrDdlParserTest {
                 + "DROP USER 'jeffrey'@'localhost';"
                 + "SET PASSWORD FOR 'jeffrey'@'localhost' = 'auth_string';"
                 + "ALTER USER 'jeffrey'@'localhost' IDENTIFIED BY 'new_password' PASSWORD EXPIRE;";
+        parser.parse(ddl, tables);
+        assertThat(tables.size()).isEqualTo(0);
+    }
+
+    @Test
+    @FixFor("DBZ-5836")
+    public void parseCreateUserDdlStatement() {
+        String ddl = "CREATE USER 'test_crm_debezium'@'%' IDENTIFIED WITH 'mysql_native_password' AS '*6BB4837EB74329105EE4568DDA7DC67ED2CA2AD9' PASSWORD EXPIRE NEVER COMMENT '-';";
         parser.parse(ddl, tables);
         assertThat(tables.size()).isEqualTo(0);
     }

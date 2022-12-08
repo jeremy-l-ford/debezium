@@ -198,7 +198,7 @@ The source configuration uses the same configuration properties that are describ
 |[[debezium-source-offset-storage]]<<debezium-source-offset-storage, `debezium.source.offset.storage`>>
 |`org.apache.kafka.connect.storage.FileOffsetBackingStore`
 |Class to use for storing and retrieving offsets for non-Kafka deployments.
-To use Redis to store offsets, use `io.debezium.server.redis.RedisOffsetBackingStore`
+To use Redis to store offsets, use `io.debezium.storage.redis.offset.RedisOffsetBackingStore`
 
 |[[debezium-source-offset-storage-file-filename]]<<debezium-source-offset-storage-file-filename, `debezium.source.offset.storage.file.filename`>>
 |
@@ -228,6 +228,22 @@ To use Redis to store offsets, use `io.debezium.server.redis.RedisOffsetBackingS
 |
 |(Optional)  If using Redis to store offsets, define the hash key in redis. If the `redis.key` configuration is not supplied, and the default value is `metadata:debezium:offsets`
 
+|[[debezium-source-offset-redis-wait-enabled]]<<redis-wait-enabled, `debezium.source.offset.storage.redis.wait.enabled`>>
+|`false`
+|If using Redis to store offsets, enables wait for replica. In case Redis is configured with a replica shard, this allows to verify that the data has been written to the replica.
+For more information see Redis https://redis.io/commands/wait/[WAIT] command.
+
+|[[debezium-source-offset-redis-wait-timeout-ms]]<<redis-wait-timeout-ms, `debezium.source.offset.storage.redis.wait.timeout.ms`>>
+|`1000`
+|If using Redis to store offsets, defines the timeout in milliseconds when waiting for replica. Must have a positive value.
+
+|[[debezium-source-offset-redis-wait-retry-enabled]]<<redis-wait-retry-enabled, `debezium.source.offset.storage.redis.wait.retry.enabled`>>
+|`false`
+|If using Redis to store offsets, enables retry on wait for replica failure.
+
+|[[debezium-source-offset-redis-wait-retry-delay]]<<redis-wait-retry-delay, `debezium.source.offset.storage.redis.wait.retry.delay.ms`>>
+|`1000`
+|If using Redis to store offsets, defines the delay of retry on wait for replica failure.
 
 |[[debezium-source-database-history-class]]<<debezium-source-database-history-class, `debezium.source.schema.history.internal`>>
 |`io.debezium.storage.kafka.history.KafkaSchemaHistory`
@@ -237,7 +253,7 @@ There are also other options available
 
 * `io.debezium.storage.file.history.FileSchemaHistory` for non-Kafka deployments
 * `io.debezium.relational.history.MemorySchemaHistory` volatile store for test environments
-* `io.debezium.server.redis.RedisSchemaHistory` volatile store for test environments
+* `io.debezium.storage.redis.history.RedisSchemaHistory` for Redis deploments
 
 |[[debezium-source-database-history-file-filename]]<<debezium-source-database-history-file-filename, `debezium.source.schema.history.internal.file.filename`>>
 |
@@ -279,6 +295,23 @@ There are also other options available
 |
 |Socket timeout of Redis client if using `RedisSchemaHistory`. Default: 2000 (ms)
 
+|[[debezium-source-database-history-redis-wait-enabled]]<<redis-wait-enabled, `debezium.source.schema.history.internal.redis.wait.enabled`>>
+|`false`
+|If using Redis to store schema history, enables wait for replica. In case Redis is configured with a replica shard, this allows to verify that the data has been written to the replica.
+For more information see Redis https://redis.io/commands/wait/[WAIT] command.
+
+|[[debezium-source-database-history-redis-wait-timeout-ms]]<<redis-wait-timeout-ms, `debezium.source.schema.history.internal.redis.wait.timeout.ms`>>
+|`1000`
+|If using Redis to store schema history, defines the timeout in milliseconds when waiting for replica. Must have a positive value.
+
+|[[debezium-source-database-history-redis-wait-retry-enabled]]<<redis-wait-retry-enabled, `debezium.source.schema.history.internal.redis.wait.retry.enabled`>>
+|`false`
+|If using Redis to store schema history, enables retry on wait for replica failure.
+
+|[[debezium-source-database-history-redis-wait-retry-delay]]<<redis-wait-retry-delay, `debezium.source.schema.history.internal.redis.wait.retry.delay.ms`>>
+|`1000`
+|If using Redis to store schema history, defines the delay of retry on wait for replica failure.
+
 |===
 
 [id="debezium-format-configuration-options"]
@@ -303,7 +336,7 @@ By default the output is in JSON format but an arbitrary implementation of Kafka
 
 |[[debezium-format-value]]<<debezium-format-value, `debezium.format.value`>>
 |`json`
-|The name of the output format for value, one of `json`/`avro`/`protobuf`/`eventclouds`.
+|The name of the output format for value, one of `json`/`avro`/`protobuf`/`cloudevents`.
 
 |[[debezium-format-value-props]]<<debezium-format-value-props, `debezium.format.value.*`>>
 |
@@ -855,10 +888,33 @@ This value will be doubled upon every retry but won't exceed `debezium.sink.redi
 |`2000`
 |Socket timeout for Redis client.
 
+|[[redis-wait-enabled]]<<redis-wait-enabled, `debezium.sink.redis.wait.enabled`>>
+|`false`
+|Enables wait for replica. In case Redis is configured with a replica shard, this allows to verify that the data has been written to the replica.
+For more information see Redis https://redis.io/commands/wait/[WAIT] command.
+
+|[[redis-wait-timeout-ms]]<<redis-wait-timeout-ms, `debezium.sink.redis.wait.timeout.ms`>>
+|`1000`
+|Timeout in milliseconds when waiting for replica. Must have a positive value.
+
+|[[redis-wait-retry-enabled]]<<redis-wait-retry-enabled, `debezium.sink.redis.wait.retry.enabled`>>
+|`false`
+|Enables retry on wait for replica failure.
+
+|[[redis-wait-retry-delay]]<<redis-wait-retry-delay, `debezium.sink.redis.wait.retry.delay.ms`>>
+|`1000`
+|Delay of retry on wait for replica failure.
+
 |[[redis-message-format]]<<redis-message-format, `debezium.sink.redis.message.format`>>
 |`compact`
 |The format of the message sent to the Redis stream. Possible values are `extended`(newer format) and `compact`(the until now, old format). 
 Read more about the message format xref:#p-redis-message-format[below].
+
+|[[redis-memory-threshold-percentage]]<<redis-memory-threshold-percentage, `debezium.sink.redis.memory.threshold.percentage`>>
+|`85`
+|The sink will stop consuming records if the used memory percentage (out of Redis configured maxmemory) is higher than this threshold.
+If Redis configured maxmemory is `0` (unlimited) then this threshold is disabled (same as if configuring it with `0`)
+
 |===
 
 [id="p-redis-message-format"]
@@ -951,6 +1007,61 @@ When the alternative implementations are not available then the default ones are
 |[[nats-streaming-ext-stream-name-mapper]]<<nats-streaming-ext-stream-name-mapper, `io.debezium.server.StreamNameMapper`>>
 |
 |Custom implementation maps the planned destination (topic) name into a physical NATS Streaming subject name.
+By default the same name is used.
+
+|===
+
+==== NATS JetStream
+NATS has a built-in distributed persistence system called https://docs.nats.io/nats-concepts/jetstream[JetStream] which enables new functionalities and higher qualities of service on top of the base 'Core NATS' functionalities and qualities of service.
+
+[cols="35%a,10%a,55%a",options="header"]
+|===
+|Property
+|Default
+|Description
+
+|[[nats-jetstream-type]]<<nats-jetstream-type, `debezium.sink.type`>>
+|
+|Must be set to `nats-jetstream`.
+
+|[[nats-jetstream-url]]<<nats-jetstream-url, `debezium.sink.nats-jetstream.url`>>
+|
+| URL (or comma separated list of URLs) to a node or nodes in the cluster formatted as `nats://host:port`.
+
+|[[nats-jetstream-create-stream]]<<nats-jetstream-create-stream, `debezium.sink.nats-jetstream.create-stream`>>
+|
+|If true, a basic stream will be created.
+
+|[[nats-jetstream-subjects]]<<nats-jetstream-subjects, `debezium.sink.nats-jetstream.subjects`>>
+| \*.*.*
+|A comma separated list of subjects, messaging channel names. Can contain wildcards like test.inventory.*
+
+|[[nats-jetstream-storage]]<<nats-jetstream-storage, `debezium.sink.nats-jetstream.storage`>>
+| memory
+| Controls how the messages are saved in the stream. Can be memory or file.
+
+|===
+
+If you need a more configurable stream, it can be created with nats cli. More about streams at: https://docs.nats.io/nats-concepts/jetstream/streams
+
+===== Injection points
+
+The NATS JetStream sink behavior can be modified by a custom logic providing alternative implementations for specific functionalities.
+When the alternative implementations are not available then the default ones are used.
+
+[cols="35%a,10%a,55%a",options="header"]
+|===
+|Interface
+|CDI classifier
+|Description
+
+|[[jetstream_connection]]<<streaming_connection, `io.nats.client.JetStream`>>
+|`@CustomConsumerBuilder`
+|Custom configured instance of a `JetStream` used to publish messages to target subjects.
+
+|[[jetstream-ext-stream-name-mapper]]<<nats-streaming-ext-stream-name-mapper, `io.debezium.server.StreamNameMapper`>>
+|
+|Custom implementation maps the planned destination (topic) name into a physical NATS JetStream subject name.
 By default the same name is used.
 
 |===
@@ -1051,3 +1162,53 @@ Some of the sinks exposes dependency injections points that enable users to prov
 Typical examples are fine tuning of the target client setup, the destination naming etc.
 
 See an example of a custom https://github.com/debezium/debezium-examples/tree/main/debezium-server-name-mapper[topic naming policy] implementation for further details.
+
+== Cassandra connector
+
+=== Running Debezium Server with Cassandra connector
+
+Running with java 11+ requires setting the following java options at startup trough the JDK_JAVA_OPTIONS environment variable or equivalent:
+
+```
+JDK_JAVA_OPTIONS="--add-exports java.base/jdk.internal.misc=ALL-UNNAMED --add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-exports java.base/sun.nio.ch=ALL-UNNAMED --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED --add-exports java.sql/java.sql=ALL-UNNAMED  --add-opens java.base/java.lang.module=ALL-UNNAMED --add-opens java.base/jdk.internal.loader=ALL-UNNAMED --add-opens java.base/jdk.internal.ref=ALL-UNNAMED --add-opens java.base/jdk.internal.reflect=ALL-UNNAMED --add-opens java.base/jdk.internal.math=ALL-UNNAMED --add-opens java.base/jdk.internal.module=ALL-UNNAMED --add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED --add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED"
+```
+
+=== Sample of basic `application.properties` for running Cassandra connector with Redis sink
+
+```
+# Sink
+debezium.sink.type=redis
+debezium.sink.redis.address=localhost:6379
+
+# Connector
+debezium.source.connector.class=io.debezium.connector.cassandra.Cassandra4Connector
+## node.id must be unique per each connector running on each Cassandra node
+debezium.source.cassandra.node.id=sample_node_01
+debezium.source.cassandra.hosts=127.0.0.1
+debezium.source.cassandra.port=9042
+debezium.source.cassandra.config=/opt/cassandra/conf/cassandra.yaml
+debezium.source.commit.log.relocation.dir=cassandra/relocdir
+debezium.source.offset.storage=io.debezium.server.redis.RedisOffsetBackingStore
+debezium.source.topic.prefix=sample_prefix
+## internal Cassandra http port
+debezium.source.http.port=8040
+```
+
+=== Transformation for Operation Code
+
+By default, Cassandra connector has it's own Operation Codes which are not entirely compatible with Debezium Operation Codes.
+If needed, a specific transform can be defined in Debezium Server's `application.properties` to enable the conversion:
+
+```
+debezium.transforms=EnvelopeTransformation
+debezium.transforms.EnvelopeTransformation.type=io.debezium.connector.cassandra.transforms.EnvelopeTransformation
+```
+
+This will convert Operation Codes as follows:
+
+```
+INSERT "i"          -> CREATE "c"
+UPDATE "u"          -> UPDATE "u"
+DELETE "d"          -> DELETE "d"
+RANGE_TOMBSTONE "r" -> TRUNCATE "t"
+```

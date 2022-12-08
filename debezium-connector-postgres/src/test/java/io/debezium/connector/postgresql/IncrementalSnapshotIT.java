@@ -14,8 +14,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.kafka.connect.data.Struct;
-import org.fest.assertions.Assertions;
-import org.fest.assertions.MapAssert;
+import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -61,11 +60,10 @@ public class IncrementalSnapshotIT extends AbstractIncrementalSnapshotTest<Postg
     protected Configuration.Builder config() {
         return TestHelper.defaultConfig()
                 .with(PostgresConnectorConfig.SNAPSHOT_MODE, SnapshotMode.NEVER.getValue())
-                .with(PostgresConnectorConfig.DROP_SLOT_ON_STOP, Boolean.TRUE)
+                .with(PostgresConnectorConfig.DROP_SLOT_ON_STOP, Boolean.FALSE)
                 .with(PostgresConnectorConfig.SIGNAL_DATA_COLLECTION, "s1.debezium_signal")
                 .with(PostgresConnectorConfig.INCREMENTAL_SNAPSHOT_CHUNK_SIZE, 10)
                 .with(PostgresConnectorConfig.SCHEMA_INCLUDE_LIST, "s1")
-                .with(PostgresConnectorConfig.DROP_SLOT_ON_STOP, false)
                 .with(RelationalDatabaseConnectorConfig.MSG_KEY_COLUMNS, "s1.a42:pk1,pk2,pk3,pk4")
                 // DBZ-4272 required to allow dropping columns just before an incremental snapshot
                 .with("database.autosave", "conservative");
@@ -82,11 +80,10 @@ public class IncrementalSnapshotIT extends AbstractIncrementalSnapshotTest<Postg
         }
         return TestHelper.defaultConfig()
                 .with(PostgresConnectorConfig.SNAPSHOT_MODE, SnapshotMode.NEVER.getValue())
-                .with(PostgresConnectorConfig.DROP_SLOT_ON_STOP, Boolean.TRUE)
+                .with(PostgresConnectorConfig.DROP_SLOT_ON_STOP, Boolean.FALSE)
                 .with(PostgresConnectorConfig.SIGNAL_DATA_COLLECTION, "s1.debezium_signal")
                 .with(PostgresConnectorConfig.INCREMENTAL_SNAPSHOT_CHUNK_SIZE, 10)
                 .with(PostgresConnectorConfig.SCHEMA_INCLUDE_LIST, "s1")
-                .with(PostgresConnectorConfig.DROP_SLOT_ON_STOP, false)
                 .with(RelationalDatabaseConnectorConfig.MSG_KEY_COLUMNS, "s1.a42:pk1,pk2,pk3,pk4")
                 .with(PostgresConnectorConfig.TABLE_INCLUDE_LIST, tableIncludeList)
                 // DBZ-4272 required to allow dropping columns just before an incremental snapshot
@@ -172,7 +169,7 @@ public class IncrementalSnapshotIT extends AbstractIncrementalSnapshotTest<Postg
                 "test_server.s1.a4",
                 null);
         for (int i = 0; i < expectedRecordCount; i++) {
-            Assertions.assertThat(dbChanges).includes(MapAssert.entry(i + 1, i));
+            Assertions.assertThat(dbChanges).contains(Assertions.entry(i + 1, i));
         }
     }
 
@@ -194,7 +191,7 @@ public class IncrementalSnapshotIT extends AbstractIncrementalSnapshotTest<Postg
                 "test_server.s1.a42",
                 null);
         for (int i = 0; i < expectedRecordCount; i++) {
-            Assertions.assertThat(dbChanges).includes(MapAssert.entry(i + 1, i));
+            Assertions.assertThat(dbChanges).contains(Assertions.entry(i + 1, i));
         }
     }
 
@@ -218,7 +215,7 @@ public class IncrementalSnapshotIT extends AbstractIncrementalSnapshotTest<Postg
                 "test_server.s1.anumeric",
                 null);
         for (int i = 0; i < expectedRecordCount; i++) {
-            Assertions.assertThat(dbChanges).includes(MapAssert.entry(i + 1, i));
+            Assertions.assertThat(dbChanges).contains(Assertions.entry(i + 1, i));
         }
     }
 
@@ -272,11 +269,11 @@ public class IncrementalSnapshotIT extends AbstractIncrementalSnapshotTest<Postg
                 null);
 
         for (int i = 0; i < expectedRecordCount; i++) {
-            Assertions.assertThat(dbChanges).includes(MapAssert.entry(i + 1, i));
+            Assertions.assertThat(dbChanges).contains(Assertions.entry(i + 1, i));
         }
         for (int i = 0; i < expectedPartRecordCount; i++) {
-            Assertions.assertThat(dbChangesPart1).includes(MapAssert.entry(i + 1, i));
-            Assertions.assertThat(dbChangesPart2).includes(MapAssert.entry(i + 1 + expectedPartRecordCount, i + expectedPartRecordCount));
+            Assertions.assertThat(dbChangesPart1).contains(Assertions.entry(i + 1, i));
+            Assertions.assertThat(dbChangesPart2).contains(Assertions.entry(i + 1 + expectedPartRecordCount, i + expectedPartRecordCount));
         }
     }
 

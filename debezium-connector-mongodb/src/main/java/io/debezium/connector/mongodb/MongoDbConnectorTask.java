@@ -163,7 +163,7 @@ public final class MongoDbConnectorTask extends BaseSourceTask<MongoDbPartition,
         Collection<Map<String, String>> partitions = loader.getPartitions();
 
         Map<Map<String, String>, Map<String, Object>> offsets = context.offsetStorageReader().offsets(partitions);
-        if (offsets != null && !offsets.values().stream().filter(Objects::nonNull).collect(Collectors.toList()).isEmpty()) {
+        if (offsets != null && offsets.values().stream().anyMatch(Objects::nonNull)) {
             MongoDbOffsetContext offsetContext = loader.loadOffsets(offsets);
             logger.info("Found previous offsets {}", offsetContext);
             return offsetContext;
@@ -180,5 +180,10 @@ public final class MongoDbConnectorTask extends BaseSourceTask<MongoDbPartition,
             throw new ConnectException("Unable to start MongoDB connector task since no replica sets were found at " + hosts);
         }
         return replicaSets;
+    }
+
+    @Override
+    protected Configuration withMaskedSensitiveOptions(Configuration config) {
+        return super.withMaskedSensitiveOptions(config).withMasked(MongoDbConnectorConfig.CONNECTION_STRING.name());
     }
 }

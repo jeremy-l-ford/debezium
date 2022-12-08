@@ -36,10 +36,14 @@ matrixJob('connector-debezium-oracle-matrix-test') {
 
         credentialsBinding{
             usernamePassword('QUAY_USERNAME', 'QUAY_PASSWORD', 'rh-integration-quay-creds')
+            string('RP_TOKEN', 'report-portal-token')
         }
     }
 
     publishers {
+        archiveArtifacts {
+            pattern('**/archive.tar.gz')
+        }
         archiveJunit('**/target/surefire-reports/*.xml')
         archiveJunit('**/target/failsafe-reports/*.xml')
         mailer('debezium-qe@redhat.com', false, true)
@@ -47,7 +51,7 @@ matrixJob('connector-debezium-oracle-matrix-test') {
 
     logRotator {
         daysToKeep(7)
-        numToKeep(10)
+        numToKeep(5)
     }
 
     steps {
@@ -64,9 +68,11 @@ if [ "$PRODUCT_BUILD" == true ] ; then
     curl -OJs $SOURCE_URL && unzip debezium-*-src.zip
     pushd debezium-*-src
     pushd $(ls | grep -P 'debezium-[^-]+.Final')
+    ATTRIBUTES="downstream Oracle $ORACLE_VERSION"
 else
     git clone $REPOSITORY .
     git checkout $BRANCH
+    ATTRIBUTES="upstream Oracle $ORACLE_VERSION"
 fi
 
 # Run database
@@ -79,7 +85,7 @@ do
 done
 
 # Prepare tests
-ORACLE_ARTIFACT_VERSION=$(mvn -s $HOME/.m2/settings-snapshots.xml -q -DforceStdout help:evaluate -Dexpression=version.oracle.driver ${MVN_PROFILE})
+ORACLE_ARTIFACT_VERSION=$(mvn -s $HOME/.m2/settings-snapshots.xml -q -DforceStdout help:evaluate -Dexpression=version.oracle.driver ${PROFILE_PROD})
 ORACLE_ARTIFACT_DIR="${HOME}/oracle-libs/${ORACLE_ARTIFACT_VERSION}.0"
 
 pushd ${ORACLE_ARTIFACT_DIR}
@@ -107,11 +113,24 @@ mvn clean install -U -s $HOME/.m2/settings-snapshots.xml -pl debezium-connector-
     -Ddatabase.user=${MVN_PROP_USER_NAME}       \\
     ${MVN_PROP_PDB_NAME}                        \\
     ${MVN_PROP_DATABASE_NAME}                   \\
-    ${MVN_PROFILE}
+    ${PROFILE_PROD}
 
 # Cleanup
 docker stop $(docker ps -a -q) || true
 docker rm $(docker ps -a -q) || true
-    ''')
+    
+RESULTS_FOLDER=final-results
+RESULTS_PATH=$RESULTS_FOLDER/results
+
+mkdir -p $RESULTS_PATH
+cp **/target/surefire-reports/*.xml $RESULTS_PATH
+cp **/target/failsafe-reports/*.xml $RESULTS_PATH
+rm -rf $RESULTS_PATH/failsafe-summary.xml
+tar czf archive.tar.gz $RESULTS_PATH
+
+docker login quay.io -u "$QUAY_USERNAME" -p "$QUAY_PASSWORD"
+
+./jenkins-jobs/scripts/report.sh --connector true --env-file env-file.env --results-folder $RESULTS_FOLDER --attributes "$ATTRIBUTES"
+''')
     }
 }

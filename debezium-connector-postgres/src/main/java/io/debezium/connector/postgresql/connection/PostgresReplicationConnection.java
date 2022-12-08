@@ -325,6 +325,8 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
             LOGGER.debug("starting streaming from LSN '{}'", lsn);
         }
 
+        validateSlotIsInExpectedState(walPosition);
+
         final int maxRetries = connectorConfig.maxRetries();
         final Duration delay = connectorConfig.retryDelay();
         int tryCount = 0;
@@ -345,6 +347,37 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
                     final Metronome metronome = Metronome.sleeper(delay, Clock.SYSTEM);
                     metronome.pause();
                 }
+            }
+        }
+    }
+
+    protected void validateSlotIsInExpectedState(WalPositionLocator walPosition) throws SQLException {
+        Lsn lsn = walPosition.getLastCommitStoredLsn() != null ? walPosition.getLastCommitStoredLsn() : walPosition.getLastEventStoredLsn();
+        if (lsn == null) {
+            return;
+        }
+        try (Statement stmt = pgConnection().createStatement()) {
+            String seekCommand = String.format(
+                    "SELECT pg_replication_slot_advance('%s', '%s')",
+                    slotName,
+                    lsn.asString());
+            LOGGER.info("Seeking to {} on the replication slot with command {}", lsn, seekCommand);
+            stmt.execute(seekCommand);
+        }
+        catch (PSQLException e) {
+            if (e.getMessage().matches("ERROR: function pg_replication_slot_advance.*does not exist(.|\\n)*")) {
+                LOGGER.info("Postgres server doesn't support the command pg_replication_slot_advance(). Not seeking to last known offset.");
+            }
+            else if (e.getMessage().matches("ERROR: must be superuser or replication role to use replication slots(.|\\n)*")) {
+                LOGGER.warn("Unable to use pg_replication_slot_advance() function. The Postgres server is likely on an old RDS version", e);
+            }
+            else if (e.getMessage().matches("ERROR: cannot advance replication slot to.*")) {
+                throw new DebeziumException(
+                        String.format("Cannot seek to the last known offset '%s' on replication slot '%s'. Error from server: %s", lsn.asString(), slotName,
+                                e.getMessage()));
+            }
+            else {
+                throw new DebeziumException(e);
             }
         }
     }
@@ -512,7 +545,9 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
 
             @Override
             public void flushLsn(Lsn lsn) throws SQLException {
-                doFlushLsn(lsn);
+                if (connectorConfig.isFlushLsnOnSource()) {
+                    doFlushLsn(lsn);
+                }
             }
 
             private void doFlushLsn(Lsn lsn) throws SQLException {

@@ -31,6 +31,7 @@ import io.debezium.connector.oracle.logminer.processor.AbstractLogMinerEventProc
 import io.debezium.pipeline.EventDispatcher;
 import io.debezium.pipeline.source.spi.ChangeEventSource.ChangeEventSourceContext;
 import io.debezium.relational.TableId;
+import io.debezium.util.Loggings;
 
 /**
  * An implementation of {@link io.debezium.connector.oracle.logminer.processor.LogMinerEventProcessor}
@@ -103,15 +104,17 @@ public abstract class AbstractInfinispanLogMinerEventProcessor extends AbstractL
                 for (String eventKey : eventKeys) {
                     final LogMinerEvent event = getEventCache().get(eventKey);
                     if (event != null && event.getRowId().equals(row.getRowId())) {
-                        LOGGER.debug("Undo change '{}' applied to transaction '{}'", row, eventKey);
+                        Loggings.logDebugAndTraceRecord(LOGGER, row, "Undo change on table '{}' applied to transaction '{}'", row.getTableId(), eventKey);
                         getEventCache().remove(eventKey);
                         return;
                     }
                 }
-                LOGGER.warn("Cannot undo change '{}' since event with row-id {} was not found.", row, row.getRowId());
+                Loggings.logWarningAndTraceRecord(LOGGER, row, "Cannot undo change on table '{}' since event with row-id {} was not found.", row.getTableId(),
+                        row.getRowId());
             }
             else if (!getConfig().isLobEnabled()) {
-                LOGGER.warn("Cannot undo change '{}' since transaction was not found.", row);
+                Loggings.logWarningAndTraceRecord(LOGGER, row, "Cannot undo change on table '{}' since transaction '{}' was not found.", row.getTableId(),
+                        row.getTransactionId());
             }
         }
         else {
@@ -123,7 +126,8 @@ public abstract class AbstractInfinispanLogMinerEventProcessor extends AbstractL
                     return;
                 }
             }
-            LOGGER.warn("Cannot undo change '{}' since event with row-id {} was not found.", row, row.getRowId());
+            Loggings.logWarningAndTraceRecord(LOGGER, row, "Cannot undo change on table '{}' since event with row-id {} was not found.", row.getTableId(),
+                    row.getRowId());
         }
     }
 
@@ -273,7 +277,7 @@ public abstract class AbstractInfinispanLogMinerEventProcessor extends AbstractL
 
     @Override
     protected PreparedStatement createQueryStatement() throws SQLException {
-        final String query = LogMinerQueryBuilder.build(getConfig(), getSchema());
+        final String query = LogMinerQueryBuilder.build(getConfig());
         return jdbcConnection.connection().prepareStatement(query,
                 ResultSet.TYPE_FORWARD_ONLY,
                 ResultSet.CONCUR_READ_ONLY,

@@ -37,7 +37,10 @@ pipeline {
                         expression { !params.APICURIO_PREPARE_BUILD_NUMBER }
                     }
                     steps {
-                        copyArtifacts projectName: 'ocp-downstream-apicurio-prepare-job', target: "${WORKSPACE}/apicurio" ,filter: 'apicurio-registry-install-examples.zip', selector: lastSuccessful()
+                        copyArtifacts projectName: 'ocp-downstream-apicurio-prepare-job',
+                                target: "${WORKSPACE}/apicurio",
+                                filter: 'apicurio-registry-install-examples.zip',
+                                selector: lastSuccessful()
                     }
                 }
                 stage('Copy apicurio artifacts') {
@@ -45,7 +48,10 @@ pipeline {
                         expression { params.APICURIO_PREPARE_BUILD_NUMBER }
                     }
                     steps {
-                        copyArtifacts projectName: 'ocp-downstream-apicurio-prepare-job', target: "${WORKSPACE}/apicurio" , filter: 'apicurio-registry-install-examples.zip', selector: specific(params.APICURIO_PREPARE_BUILD_NUMBER)
+                        copyArtifacts projectName: 'ocp-downstream-apicurio-prepare-job',
+                                target: "${WORKSPACE}/apicurio",
+                                filter: 'apicurio-registry-install-examples.zip',
+                                selector: specific(params.APICURIO_PREPARE_BUILD_NUMBER)
                     }
                 }
 
@@ -54,7 +60,10 @@ pipeline {
                         expression { !params.STRIMZI_PREPARE_BUILD_NUMBER }
                     }
                     steps {
-                        copyArtifacts projectName: 'ocp-downstream-strimzi-prepare-job', target: "${WORKSPACE}/strimzi" , filter: 'amq-streams-install-examples.zip', selector: lastSuccessful()
+                        copyArtifacts projectName: 'ocp-downstream-strimzi-prepare-job',
+                                target: "${WORKSPACE}/strimzi",
+                                filter: 'amq-streams-install-examples.zip',
+                                selector: lastSuccessful()
                     }
                 }
                 stage('Copy strimzi artifacts') {
@@ -62,7 +71,10 @@ pipeline {
                         expression { params.STRIMZI_PREPARE_BUILD_NUMBER }
                     }
                     steps {
-                        copyArtifacts projectName: 'ocp-downstream-strimzi-prepare-job', target: "${WORKSPACE}/strimzi" , filter: 'amq-streams-install-examples.zip', selector: specific(params.STRIMZI_PREPARE_BUILD_NUMBER)
+                        copyArtifacts projectName: 'ocp-downstream-strimzi-prepare-job',
+                                target: "${WORKSPACE}/strimzi",
+                                filter: 'amq-streams-install-examples.zip',
+                                selector: specific(params.STRIMZI_PREPARE_BUILD_NUMBER)
                     }
                 }
             }
@@ -72,7 +84,7 @@ pipeline {
             steps {
                 withCredentials([
                         usernamePassword(credentialsId: "${OCP_CREDENTIALS}", usernameVariable: 'OCP_USERNAME', passwordVariable: 'OCP_PASSWORD'),
-                        file(credentialsId: "${PULL_SECRET}", variable: 'SECRET_PATH'),
+                        file(credentialsId: "${params.PULL_SECRET}", variable: 'SECRET_PATH'),
                 ]) {
                     sh '''
                     oc login -u "${OCP_USERNAME}" -p "${OCP_PASSWORD}" --insecure-skip-tls-verify=true "${OCP_URL}"
@@ -128,7 +140,7 @@ pipeline {
             }
             steps {
                 withCredentials([
-                    file(credentialsId: "${PULL_SECRET}", variable: 'SECRET_PATH'),
+                    file(credentialsId: "${params.PULL_SECRET}", variable: 'SECRET_PATH'),
                 ]) {
                     sh '''
                     source ${DEBEZIUM_LOCATION}/${OCP_PROJECT_NAME}.ocp.env
@@ -150,7 +162,7 @@ pipeline {
             }
             steps {
                 withCredentials([
-                    file(credentialsId: "${PULL_SECRET}", variable: 'SECRET_PATH'),
+                    file(credentialsId: "${params.PULL_SECRET}", variable: 'SECRET_PATH'),
                 ]) {
                     sh '''
                     source ${DEBEZIUM_LOCATION}/${OCP_PROJECT_NAME}.ocp.env
@@ -170,7 +182,7 @@ pipeline {
             steps {
                 withCredentials([
                         usernamePassword(credentialsId: "${OCP_CREDENTIALS}", usernameVariable: 'OCP_USERNAME', passwordVariable: 'OCP_PASSWORD'),
-                        file(credentialsId: "${PULL_SECRET}", variable: 'SECRET_PATH'),
+                        file(credentialsId: "${params.PULL_SECRET}", variable: 'SECRET_PATH'),
                 ]) {
                     sh '''
                     cd ${DEBEZIUM_LOCATION}
@@ -181,10 +193,12 @@ pipeline {
                         DBZ_GROUPS_ARG="${DBZ_GROUPS_ARG} & !avro"
                     fi
 
-                    JOB_DESC_FILE="testsuite-job.yml"
+                    POD_DESCRIPTION="testsuite.yml"
                     PULL_SECRET_NAME=$(cat ${SECRET_PATH} | grep name | awk '{print $2;}')
 
-                    jenkins-jobs/docker/debezium-testing-system/deployment-template.sh --filename "${JOB_DESC_FILE}" \
+                    LOG_LOCATION_IN_POD=/root/testsuite/testsuite_log
+
+                    jenkins-jobs/docker/debezium-testing-system/deployment-template.sh --filename "${POD_DESCRIPTION}" \
                         --pull-secret-name "${PULL_SECRET_NAME}" \
                         --docker-tag "${DOCKER_TAG}" \
                         --project-name "${OCP_PROJECT_NAME}" \
@@ -196,14 +210,26 @@ pipeline {
                         --dbz-connect-image "${DBZ_CONNECT_IMAGE}" \
                         --artifact-server-image "${ARTIFACT_SERVER_IMAGE}" \
                         --dbz-git-repository "${DBZ_GIT_REPOSITORY}" \
-                        --dbz-git-branch "${DBZ_GIT_BRANCH}"
+                        --dbz-git-branch "${DBZ_GIT_BRANCH}" \
+                        --testsuite-log "${LOG_LOCATION_IN_POD}"
 
-                    oc create -f "${JOB_DESC_FILE}"
-
+                    oc create -f "${POD_DESCRIPTION}"
+                    pod_name=$(oc get pods | tail -1 | awk '{print $1;}')
+                    
+                    {
+                        oc wait --timeout=10h --for=condition=Ready pod/${pod_name}
+                        
+                        # copy log and test results                 
+                        mkdir ${WORKSPACE}/testsuite_artifacts
+                        oc rsync ${pod_name}:${LOG_LOCATION_IN_POD} ${WORKSPACE}/testsuite_artifacts
+                        oc rsync ${pod_name}:/root/testsuite/artifacts.zip ${WORKSPACE}/testsuite_artifacts || oc delete pod ${pod_name}
+                        oc delete pod ${pod_name}
+                    } & 
+                    
+                    # wait for container to start and print logs
                     for i in {1..100}; do
                         sleep 2
-                        pod_name=$(oc get pods | tail -1 | awk '{print $1;}')
-                        oc logs -f ${pod_name} && break
+                        oc logs -f ${pod_name}  && break
                     done
                     '''
                 }
@@ -216,6 +242,30 @@ pipeline {
             cd ${DEBEZIUM_LOCATION}
             ./jenkins-jobs/scripts/ocp-projects.sh --delete --testsuite --project ${OCP_PROJECT_NAME}
             '''
+            archiveArtifacts "**/testsuite_artifacts/*"
+            withCredentials([
+                    usernamePassword(credentialsId: "rh-integration-quay-creds", usernameVariable: 'QUAY_USERNAME', passwordVariable: 'QUAY_PASSWORD'),
+                    string(credentialsId: "report-portal-token", variable: 'RP_TOKEN'),
+            ]) {
+                sh '''
+                if [ "${PRODUCT_BUILD}" == true ] ; then
+                    export ATTRIBUTES="downstream ocp"
+                else
+                    export ATTRIBUTES="upstream ocp"
+                fi
+
+                cd ${WORKSPACE}/testsuite_artifacts
+                mkdir results    
+                unzip artifacts.zip -d results
+                
+                RESULTS_FOLDER="."
+                rm -rf ${RESULTS_FOLDER}/failsafe-summary.xml            
+                
+                docker login quay.io -u "$QUAY_USERNAME" -p "$QUAY_PASSWORD"
+
+                ${DEBEZIUM_LOCATION}/jenkins-jobs/scripts/report.sh --connector false --env-file env-file.env --results-folder ${RESULTS_FOLDER} --attributes "${ATTRIBUTES}"
+                '''
+            }
         }
     }
 }

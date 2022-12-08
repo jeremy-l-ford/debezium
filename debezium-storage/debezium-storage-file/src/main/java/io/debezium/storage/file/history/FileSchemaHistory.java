@@ -8,8 +8,6 @@ package io.debezium.storage.file.history;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,7 +32,7 @@ import io.debezium.relational.history.SchemaHistoryException;
 import io.debezium.relational.history.SchemaHistoryListener;
 import io.debezium.util.Collect;
 import io.debezium.util.FunctionalReadWriteLock;
-import io.debezium.util.Throwables;
+import io.debezium.util.Loggings;
 
 /**
  * A {@link SchemaHistory} implementation that stores the schema history in a local file.
@@ -50,7 +48,6 @@ public final class FileSchemaHistory extends AbstractSchemaHistory {
 
     public static Collection<Field> ALL_FIELDS = Collect.arrayListOf(FILE_PATH);
 
-    private static final Charset UTF8 = StandardCharsets.UTF_8;
     private final FunctionalReadWriteLock lock = FunctionalReadWriteLock.reentrant();
     private final DocumentWriter writer = DocumentWriter.defaultWriter();
     private final DocumentReader reader = DocumentReader.defaultReader();
@@ -63,7 +60,6 @@ public final class FileSchemaHistory extends AbstractSchemaHistory {
             throw new ConnectException(
                     "Error configuring an instance of " + getClass().getSimpleName() + "; check the logs for details");
         }
-        config.validateAndRecord(ALL_FIELDS, logger::error);
         if (running.get()) {
             throw new IllegalStateException("Database schema history file already initialized to " + path);
         }
@@ -125,7 +121,7 @@ public final class FileSchemaHistory extends AbstractSchemaHistory {
                         historyWriter.newLine();
                     }
                     catch (IOException e) {
-                        Throwables.logErrorAndTraceRecord(logger, record, "Failed to add record to history at {}", path, e);
+                        Loggings.logErrorAndTraceRecord(logger, record, "Failed to add record to history at {}", path, e);
                         return;
                     }
                 }
@@ -134,7 +130,7 @@ public final class FileSchemaHistory extends AbstractSchemaHistory {
                 }
             }
             catch (IOException e) {
-                Throwables.logErrorAndTraceRecord(logger, record, "Failed to convert record to string", e);
+                Loggings.logErrorAndTraceRecord(logger, record, "Failed to convert record to string", e);
             }
         });
     }

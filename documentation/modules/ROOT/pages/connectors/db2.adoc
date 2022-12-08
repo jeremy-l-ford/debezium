@@ -153,6 +153,18 @@ include::{partialsdir}/modules/all-connectors/con-connector-incremental-snapshot
 The {prodname} connector for Db2 does not support schema changes while an incremental snapshot is running.
 ====
 
+// Type: procedure
+[id="db2-triggering-an-incremental-snapshot"]
+==== Triggering an incremental snapshot
+
+include::{partialsdir}/modules/all-connectors/proc-triggering-an-incremental-snapshot.adoc[leveloffset=+3,tags=!nosql-based-snapshot]
+
+// Type: procedure
+[id="db2-stopping-an-incremental-snapshot"]
+==== Stopping an incremental snapshot
+
+include::{partialsdir}/modules/all-connectors/proc-stopping-an-incremental-snapshot.adoc[leveloffset=+3,tags=!nosql-based-snapshot]
+
 // Type: concept
 // Title: How {prodname} Db2 connectors read change-data tables
 [id="how-debezium-db2-connectors-read-change-data-tables"]
@@ -1291,29 +1303,6 @@ Represents the number of nanoseconds past midnight, and does not include timezon
  +
 Represents the number of milliseconds since the epoch, and does not include timezone information.
 
-|`SMALLDATETIME`
-|`INT64`
-|`io.debezium.time.Timestamp` +
- +
-Represents the number of milliseconds since the epoch, and does not include timezone information.
-
-|`DATETIME2(0)`, `DATETIME2(1)`, `DATETIME2(2)`, `DATETIME2(3)`
-|`INT64`
-|`io.debezium.time.Timestamp` +
- +
-Represents the number of milliseconds since the epoch, and does not include timezone information.
-
-|`DATETIME2(4)`, `DATETIME2(5)`, `DATETIME2(6)`
-|`INT64`
-|`io.debezium.time.MicroTimestamp` +
- +
-Represents the number of microseconds since the epoch, and does not include timezone information.
-
-|`DATETIME2(7)`
-|`INT64`
-|`io.debezium.time.NanoTimestamp` +
- +
-Represents the number of nanoseconds past the epoch, and does not include timezone information.
 |===
 
 [[db2-time-precision-mode-connect]]
@@ -1343,24 +1332,14 @@ Represents the number of milliseconds since midnight, and does not include timez
  +
 Represents the number of milliseconds since the epoch, and does not include timezone information.
 
-|`SMALLDATETIME`
-|`INT64`
-|`org.apache.kafka.connect.data.Timestamp` +
- +
-Represents the number of milliseconds since the epoch, and does not include timezone information.
-
-|`DATETIME2`
-|`INT64`
-|`org.apache.kafka.connect.data.Timestamp` +
- +
-Represents the number of milliseconds since the epoch, and does not include timezone information. Db2 allows `P` to be in the range 0-7 to store up to tenth of a microsecond precision, though this mode results in a loss of precision when `P` is greater than 3.
 |===
 
 [[db2-timestamp-types]]
 === Timestamp types
 
-The `DATETIME`, `SMALLDATETIME` and `DATETIME2` types represent a timestamp without time zone information.
-Such columns are converted into an equivalent Kafka Connect value based on UTC. For example, the `DATETIME2` value "2018-06-20 15:13:16.945104" is represented by an `io.debezium.time.MicroTimestamp` with the value "1529507596945104".
+The `DATETIME` type represents a timestamp without time zone information.
+Such columns are converted into an equivalent Kafka Connect value based on UTC.
+For example, the `DATETIME` value "2018-06-20 15:13:16.945104" is represented by an `io.debezium.time.Timestamp` with the value "1529507596000".
 
 The timezone of the JVM running Kafka Connect and {prodname} does not affect this conversion.
 
@@ -1385,19 +1364,6 @@ The `connect.decimal.precision` schema parameter contains an integer that repres
 The `scale` schema parameter contains an integer that represents how many digits the decimal point is shifted.
 The `connect.decimal.precision` schema parameter contains an integer that  represents the precision of the given decimal value.
 
-|`SMALLMONEY`
-|`BYTES`
-|`org.apache.kafka.connect.data.Decimal` +
- +
-The `scale` schema parameter contains an integer that represents how many digits the decimal point iss shifted.
-The `connect.decimal.precision` schema parameter contains an integer that represents the precision of the given decimal value.
-
-|`MONEY`
-|`BYTES`
-|`org.apache.kafka.connect.data.Decimal` +
- +
-The `scale` schema parameter contains an integer that represents how many digits the decimal point is shifted.
-The `connect.decimal.precision` schema parameter contains an integer that represents the precision of the given decimal value.
 |===
 
 // Type: assembly
@@ -1641,7 +1607,7 @@ To enable the connector to access the database, you must add the driver to your 
 . Add the directory with the JAR files to {link-kafka-docs}/#connectconfigs[Kafka Connect's `plugin.path`].
 . Restart your Kafka Connect process to pick up the new JAR files.
 
-If you are working with immutable containers, see link:https://hub.docker.com/r/debezium/[{prodname}'s container images] for Apache ZooKeeper, Apache Kafka and Kafka Connect with the Db2 connector already installed and ready to run.
+If you are working with immutable containers, see link:https://quay.io/organization/debezium[{prodname}'s container images] for Apache ZooKeeper, Apache Kafka and Kafka Connect with the Db2 connector already installed and ready to run.
 
 You can also xref:operations/openshift.adoc[run {prodname} on Kubernetes and OpenShift].
 
@@ -1729,19 +1695,37 @@ For more information, see link:{LinkDeployStreamsOpenShift}[{NameDeployStreamsOp
 .. Create a Dockerfile that uses `{DockerKafkaConnect}` as the base image.
 For example, from a terminal window, enter the following command:
 +
+=====================================================================
+
 [source,shell,subs="+attributes,+quotes"]
 ----
 cat <<EOF >debezium-container-for-db2.yaml // <1>
 FROM {DockerKafkaConnect}
 USER root:root
 RUN mkdir -p /opt/kafka/plugins/debezium // <2>
-RUN curl -O {red-hat-maven-repository}debezium/debezium-connector-{connector-file}/{debezium-version}-redhat-__<build_number>__/debezium-connector-{connector-file}-{debezium-version}-redhat-__<build_number>__-plugin.zip
-RUN curl -O https://repo1.maven.org/maven2/com/ibm/db2/jcc/{db2-version}/jcc-{db2-version}.jar
+RUN cd /opt/kafka/plugins/debezium/ \
+&& curl -O {red-hat-maven-repository}debezium/debezium-connector-{connector-file}/{debezium-version}-redhat-__<build_number>__/debezium-connector-{connector-file}-{debezium-version}-redhat-__<build_number>__-plugin.zip \
+&& unzip debezium-connector-{connector-file}-{debezium-version}-redhat-__<build_number>__-plugin.zip \
+&& rm debezium-connector-{connector-file}-{debezium-version}-redhat-__<build_number>__-plugin.zip
+RUN cd /opt/kafka/plugins/debezium/ \
+&& curl -O https://repo1.maven.org/maven2/com/ibm/db2/jcc/{db2-version}/jcc-{db2-version}.jar
 USER 1001
 EOF
 ----
-<1> You can specify any file name that you want.
-<2> Specifies the path to your Kafka Connect plug-ins directory. If your Kafka Connect plug-ins directory is in a different location, replace this path with the actual path of your directory.
+=====================================================================
++
+[cols="1,7",options="header"]
+|===
+|Item |Description
+
+|1
+|You can specify any file name that you want.
+
+|2
+|Specifies the path to your Kafka Connect plug-ins directory.
+If your Kafka Connect plug-ins directory is in a different location, replace this path with the actual path of your directory.
+
+|===
 +
 The command creates a Dockerfile with the name `debezium-container-for-db2.yaml` in the current directory.
 
@@ -1776,6 +1760,7 @@ docker push _<myregistry.io>_/debezium-container-for-db2:latest
 .. Create a new {prodname} Db2 `KafkaConnect` custom resource (CR).
 For example, create a `KafkaConnect` CR with the name `dbz-connect.yaml` that specifies `annotations` and `image` properties as shown in the following example:
 +
+=====================================================================
 [source,yaml,subs="+attributes"]
 ----
 apiVersion: {KafkaConnectApiVersion}
@@ -1788,9 +1773,20 @@ spec:
   #...
   image: debezium-container-for-db2  // <2>
 ----
-<1>  `metadata.annotations` indicates to the Cluster Operator that `KafkaConnector` resources are used to configure connectors in this Kafka Connect cluster.
-<2>  `spec.image` specifies the name of the image that you created to run your Debezium connector.
+=====================================================================
++
+[cols="1,7",options="header"]
+|===
+|Item |Description
+
+|1
+|`metadata.annotations` indicates to the Cluster Operator that `KafkaConnector` resources are used to configure connectors in this Kafka Connect cluster.
+
+|2
+|`spec.image` specifies the name of the image that you created to run your Debezium connector.
 This property overrides the `STRIMZI_DEFAULT_KAFKA_CONNECT_IMAGE` variable in the Cluster Operator.
+
+|===
 
 .. Apply the `KafkaConnect` CR to the OpenShift Kafka Connect environment by entering the following command:
 +

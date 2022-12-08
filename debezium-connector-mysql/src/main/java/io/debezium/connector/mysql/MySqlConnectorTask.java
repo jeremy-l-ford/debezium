@@ -231,21 +231,16 @@ public class MySqlConnectorTask extends BaseSourceTask<MySqlPartition, MySqlOffs
     private void validateBinlogConfiguration(MySqlConnectorConfig config) {
         if (config.getSnapshotMode().shouldStream()) {
             // Check whether the row-level binlog is enabled ...
-            final boolean binlogFormatRow = connection.isBinlogFormatRow();
-            final boolean binlogRowImageFull = connection.isBinlogRowImageFull();
-            final boolean rowBinlogEnabled = binlogFormatRow && binlogRowImageFull;
+            if (!connection.isBinlogFormatRow()) {
+                throw new DebeziumException("The MySQL server is not configured to use a ROW binlog_format, which is "
+                        + "required for this connector to work properly. Change the MySQL configuration to use a "
+                        + "binlog_format=ROW and restart the connector.");
+            }
 
-            if (!rowBinlogEnabled) {
-                if (!binlogFormatRow) {
-                    throw new DebeziumException("The MySQL server is not configured to use a ROW binlog_format, which is "
-                            + "required for this connector to work properly. Change the MySQL configuration to use a "
-                            + "binlog_format=ROW and restart the connector.");
-                }
-                else {
-                    throw new DebeziumException("The MySQL server is not configured to use a FULL binlog_row_image, which is "
-                            + "required for this connector to work properly. Change the MySQL configuration to use a "
-                            + "binlog_row_image=FULL and restart the connector.");
-                }
+            if (!connection.isBinlogRowImageFull()) {
+                throw new DebeziumException("The MySQL server is not configured to use a FULL binlog_row_image, which is "
+                        + "required for this connector to work properly. Change the MySQL configuration to use a "
+                        + "binlog_row_image=FULL and restart the connector.");
             }
         }
     }

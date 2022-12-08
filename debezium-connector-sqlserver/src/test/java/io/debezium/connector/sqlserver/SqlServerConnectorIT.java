@@ -8,10 +8,12 @@ package io.debezium.connector.sqlserver;
 import static io.debezium.connector.sqlserver.util.TestHelper.TYPE_LENGTH_PARAMETER_KEY;
 import static io.debezium.connector.sqlserver.util.TestHelper.TYPE_NAME_PARAMETER_KEY;
 import static io.debezium.connector.sqlserver.util.TestHelper.TYPE_SCALE_PARAMETER_KEY;
+import static io.debezium.connector.sqlserver.util.TestHelper.waitForStreamingStarted;
 import static io.debezium.relational.RelationalDatabaseConnectorConfig.SCHEMA_EXCLUDE_LIST;
 import static io.debezium.relational.RelationalDatabaseConnectorConfig.SCHEMA_INCLUDE_LIST;
-import static org.fest.assertions.Assertions.assertThat;
-import static org.fest.assertions.MapAssert.entry;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
 import java.io.IOException;
@@ -37,8 +39,8 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
+import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
-import org.fest.assertions.Assertions;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
@@ -2304,21 +2306,21 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         assertThat(before.schema().field("c1").schema().parameters()).isNull();
         assertThat(before.schema().field("c2").schema().parameters()).isNull();
 
-        assertThat(before.schema().field("c3a").schema().parameters()).includes(
+        assertThat(before.schema().field("c3a").schema().parameters()).contains(
                 entry(TYPE_NAME_PARAMETER_KEY, "NUMERIC"),
                 entry(TYPE_LENGTH_PARAMETER_KEY, "5"),
                 entry(TYPE_SCALE_PARAMETER_KEY, "2"));
 
-        assertThat(before.schema().field("c3b").schema().parameters()).includes(
+        assertThat(before.schema().field("c3b").schema().parameters()).contains(
                 entry(TYPE_NAME_PARAMETER_KEY, "VARCHAR"),
                 entry(TYPE_LENGTH_PARAMETER_KEY, "128"));
 
-        assertThat(before.schema().field("f2").schema().parameters()).includes(
+        assertThat(before.schema().field("f2").schema().parameters()).contains(
                 entry(TYPE_NAME_PARAMETER_KEY, "DECIMAL"),
                 entry(TYPE_LENGTH_PARAMETER_KEY, "8"),
                 entry(TYPE_SCALE_PARAMETER_KEY, "4"));
 
-        assertThat(before.schema().field("f1").schema().parameters()).includes(
+        assertThat(before.schema().field("f1").schema().parameters()).contains(
                 entry(TYPE_NAME_PARAMETER_KEY, "REAL"),
                 entry(TYPE_LENGTH_PARAMETER_KEY, "24"));
 
@@ -2598,6 +2600,24 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
     }
 
     @Test
+    public void shouldFailWhenUserDoesNotHaveAccessToDatabase() {
+        TestHelper.createTestDatabases(TestHelper.TEST_DATABASE_2);
+        final Configuration config2 = TestHelper.defaultConfig(
+                TestHelper.TEST_DATABASE_1, TestHelper.TEST_DATABASE_2)
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .build();
+        Map<String, Object> result = new HashMap<>();
+        start(SqlServerConnector.class, config2, (success, message, error) -> {
+            result.put("success", success);
+            result.put("message", message);
+        });
+        assertEquals(false, result.get("success"));
+        assertEquals(
+                "Connector configuration is not valid. User sa does not have access to CDC schema in the following databases: testDB2. This user can only be used in initial_only snapshot mode",
+                result.get("message"));
+    }
+
+    @Test
     @FixFor("DBZ-5033")
     public void shouldIgnoreNullOffsetsWhenRecoveringHistory() {
         final Configuration config1 = TestHelper.defaultConfig()
@@ -2611,10 +2631,189 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         TestHelper.createTestDatabases(TestHelper.TEST_DATABASE_2);
         final Configuration config2 = TestHelper.defaultConfig(
                 TestHelper.TEST_DATABASE_1, TestHelper.TEST_DATABASE_2)
-                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL_ONLY)
                 .build();
         start(SqlServerConnector.class, config2);
         assertConnectorIsRunning();
+        TestHelper.waitForDatabaseSnapshotToBeCompleted(TestHelper.TEST_DATABASE_2);
+        stopConnector();
+    }
+
+    @Test
+    @FixFor("DBZ-5423")
+    public void shouldStreamToOldTableAfterRename() throws Exception {
+        connection.execute(
+                "CREATE TABLE account (id int, name varchar(30), amount integer primary key(id))");
+        TestHelper.enableTableCdc(connection, "account");
+
+        final Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .build();
+
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+
+        // Wait for snapshot completion
+        consumeRecordsByTopic(1);
+
+        final Schema expectedSchema = SchemaBuilder.struct()
+                .optional()
+                .name("server1.testDB1.dbo.account.Value")
+                .field("id", Schema.INT32_SCHEMA)
+                .field("name", Schema.OPTIONAL_STRING_SCHEMA)
+                .field("amount", Schema.OPTIONAL_INT32_SCHEMA)
+                .build();
+
+        connection.setAutoCommit(false);
+
+        // Insert a record prior to rename
+        connection.execute("INSERT INTO account VALUES(10, 'some_name', 120)");
+
+        // Assert emitted record state
+        SourceRecords records = consumeRecordsByTopic(1);
+        List<SourceRecord> recordsForTopic = records.recordsForTopic("server1.testDB1.dbo.account");
+        assertThat(recordsForTopic).hasSize(1);
+
+        SourceRecordAssert.assertThat(recordsForTopic.get(0))
+                .valueAfterFieldIsEqualTo(
+                        new Struct(expectedSchema)
+                                .put("id", 10)
+                                .put("name", "some_name")
+                                .put("amount", 120))
+                .valueAfterFieldSchemaIsEqualTo(expectedSchema);
+
+        // Rename table and test insertion post-insert
+        // This is to verify that the emitted events still are emitted as "account" despite the table rename
+        connection.execute("EXEC sp_rename 'account', 'account_new'");
+        connection.execute("INSERT INTO account_new VALUES (11, 'some_value', 240)");
+
+        records = consumeRecordsByTopic(1);
+        recordsForTopic = records.recordsForTopic("server1.testDB1.dbo.account");
+        List<SourceRecord> recordsForNewTableTopic = records.recordsForTopic("server1.testDB1.dbo.account_new");
+
+        // Assert state
+        assertThat(recordsForTopic).hasSize(1);
+        assertThat(recordsForNewTableTopic).isNull();
+        assertNoRecordsToConsume();
+
+        SourceRecordAssert.assertThat(recordsForTopic.get(0))
+                .valueAfterFieldIsEqualTo(
+                        new Struct(expectedSchema)
+                                .put("id", 11)
+                                .put("name", "some_value")
+                                .put("amount", 240))
+                .valueAfterFieldSchemaIsEqualTo(expectedSchema);
+    }
+
+    @Test
+    @FixFor("DBZ-5423")
+    public void shouldStreamToNewTableAfterRestart() throws Exception {
+        connection.execute(
+                "CREATE TABLE account (id int, name varchar(30), amount integer primary key(id))");
+        TestHelper.enableTableCdc(connection, "account");
+
+        final Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .build();
+
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+
+        // Wait for snapshot completion
+        consumeRecordsByTopic(1);
+
+        final Schema expectedSchema = SchemaBuilder.struct()
+                .optional()
+                .name("server1.testDB1.dbo.account.Value")
+                .field("id", Schema.INT32_SCHEMA)
+                .field("name", Schema.OPTIONAL_STRING_SCHEMA)
+                .field("amount", Schema.OPTIONAL_INT32_SCHEMA)
+                .build();
+
+        connection.setAutoCommit(false);
+
+        // Insert a record prior to rename
+        connection.execute("INSERT INTO account VALUES(10, 'some_name', 120)");
+
+        // Assert emitted record state
+        SourceRecords records = consumeRecordsByTopic(1);
+        List<SourceRecord> recordsForTopic = records.recordsForTopic("server1.testDB1.dbo.account");
+        assertThat(recordsForTopic).hasSize(1);
+
+        SourceRecordAssert.assertThat(recordsForTopic.get(0))
+                .valueAfterFieldIsEqualTo(
+                        new Struct(expectedSchema)
+                                .put("id", 10)
+                                .put("name", "some_name")
+                                .put("amount", 120))
+                .valueAfterFieldSchemaIsEqualTo(expectedSchema);
+
+        // Rename table and test insertion post-insert
+        // This is to verify that the emitted events still are emitted as "account" despite the table rename
+        connection.execute("EXEC sp_rename 'account', 'account_new'");
+        connection.execute("INSERT INTO account_new VALUES (11, 'some_value', 240)");
+
+        records = consumeRecordsByTopic(1);
+        recordsForTopic = records.recordsForTopic("server1.testDB1.dbo.account");
+        List<SourceRecord> recordsForNewTableTopic = records.recordsForTopic("server1.testDB1.dbo.account_new");
+
+        // Assert state
+        assertThat(recordsForTopic).hasSize(1);
+        assertThat(recordsForNewTableTopic).isNull();
+        assertNoRecordsToConsume();
+
+        SourceRecordAssert.assertThat(recordsForTopic.get(0))
+                .valueAfterFieldIsEqualTo(
+                        new Struct(expectedSchema)
+                                .put("id", 11)
+                                .put("name", "some_value")
+                                .put("amount", 240))
+                .valueAfterFieldSchemaIsEqualTo(expectedSchema);
+
+        stopConnector();
+
+        final Schema newExpectedSchema = SchemaBuilder.struct()
+                .optional()
+                .name("server1.testDB1.dbo.account_new.Value")
+                .field("id", Schema.INT32_SCHEMA)
+                .field("name", Schema.OPTIONAL_STRING_SCHEMA)
+                .field("amount", Schema.OPTIONAL_INT32_SCHEMA)
+                .build();
+
+        // Restart the connector
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+
+        waitForStreamingStarted();
+        assertNoRecordsToConsume();
+
+        connection.execute("INSERT INTO account_new VALUES (12, 'some_value2', 241)");
+
+        records = consumeRecordsByTopic(1);
+        recordsForTopic = records.recordsForTopic("server1.testDB1.dbo.account");
+        recordsForNewTableTopic = records.recordsForTopic("server1.testDB1.dbo.account_new");
+
+        final Schema expectedSchemaAfter = SchemaBuilder.struct()
+                .optional()
+                .name("server1.testDB1.dbo.account_new.Value")
+                .field("id", Schema.INT32_SCHEMA)
+                .field("name", Schema.OPTIONAL_STRING_SCHEMA)
+                .field("amount", Schema.OPTIONAL_INT32_SCHEMA)
+                .build();
+
+        // Assert state
+        assertThat(recordsForTopic).isNull();
+        assertThat(recordsForNewTableTopic).hasSize(1);
+        assertNoRecordsToConsume();
+
+        SourceRecordAssert.assertThat(recordsForNewTableTopic.get(0))
+                .valueAfterFieldIsEqualTo(
+                        new Struct(newExpectedSchema)
+                                .put("id", 12)
+                                .put("name", "some_value2")
+                                .put("amount", 241))
+                .valueAfterFieldSchemaIsEqualTo(newExpectedSchema);
+
         stopConnector();
     }
 
